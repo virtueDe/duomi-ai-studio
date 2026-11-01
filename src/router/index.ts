@@ -7,6 +7,8 @@ import { useLoadingStore } from '../stores/loading'
 const Home = () => import('../views/home/home.vue')
 const Generate = () => import('../views/generate/generate.vue')
 const Canana = () => import('../views/canana/canana.vue')
+const DuomiStudio = () => import('../views/duomi/DuomiStudioView.vue')
+const duomiStudioAtMountRoot = import.meta.env.BASE_URL.replace(/\/+$/, '') === '/duomi-studio'
 const AccountManagement = () => import('../views/account/AccountManagement.vue')
 const PublishCenter = () => import('../views/publish/PublishCenter.vue')
 const AssetManagement = () => import('../views/asset/AssetManagement.vue')
@@ -41,6 +43,12 @@ const routes: RouteRecordRaw[] = [
     path: '/install',
     name: 'Install',
     component: Install,
+  },
+  {
+    path: duomiStudioAtMountRoot ? '/' : '/duomi-studio',
+    ...(!duomiStudioAtMountRoot ? { alias: '/duomi-studio/' } : {}),
+    name: 'DuomiStudio',
+    component: DuomiStudio,
   },
   {
     path: '/',
@@ -281,7 +289,7 @@ const routes: RouteRecordRaw[] = [
 ]
 
 const router = createRouter({
-  history: createWebHistory(),
+  history: createWebHistory(import.meta.env.BASE_URL),
   routes,
 })
 
@@ -290,12 +298,13 @@ router.beforeEach(async (to) => {
   // 路由切换开启全局进度条
   useLoadingStore().start('route')
 
+  const isDuomiStudioRoute = to.name === 'DuomiStudio'
   const systemInitStore = useSystemInitStore()
-  if (!systemInitStore.systemInitInitialized.value || systemInitStore.systemInitLoading.value) {
+  if (!isDuomiStudioRoute && (!systemInitStore.systemInitInitialized.value || systemInitStore.systemInitLoading.value)) {
     await systemInitStore.loadStatus()
   }
 
-  if (!systemInitStore.isInitialized.value && to.path !== '/install') {
+  if (!isDuomiStudioRoute && !systemInitStore.isInitialized.value && to.path !== '/install') {
     return {
       path: '/install',
       query: to.fullPath && to.fullPath !== '/install'

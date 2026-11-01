@@ -1,0 +1,7 @@
+interface:
+  display_name: "Duomi AI Studio Feature Release"
+  short_description: "Validate, version, and release Duomi AI Studio changes"
+  default_prompt: "Use $duomi-feature-release to start or finish a Duomi change and release it only when explicitly authorized."
+
+policy:
+  allow_implicit_invocation: true

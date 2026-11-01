@@ -10,6 +10,9 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
+dist-service
+auto-imports.d.ts
+components.d.ts
 
 # 不维护 npm lock，CI 使用 npm install（无 setup-node 缓存）
 package-lock.json
@@ -26,7 +29,9 @@ package-lock.json
 *.njsproj
 *.sln
 *.sw?
-.agents/
+.agents/*
+!.agents/skills/
+!.agents/skills/**
 .claude/
 .codemoss/
 .codex-temp/

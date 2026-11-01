@@ -2,6 +2,7 @@ declare global {
   interface Window {
     __CANANA_RUNTIME_CONFIG__?: {
       VITE_API_BASE_URL?: string
+      VITE_SUB2API_BASE_URL?: string
       VITE_PROVIDER_DEFAULT_BASE_URL?: string
     }
   }
@@ -27,6 +28,22 @@ const readViteApiBaseUrl = () => {
 export const API_BASE_URL = readRuntimeApiBaseUrl().replace(/\/+$/, '')
   || readViteApiBaseUrl().replace(/\/+$/, '')
 
+const readRuntimeSub2ApiBaseUrl = () => {
+  if (typeof window === 'undefined') return ''
+  return String(window.__CANANA_RUNTIME_CONFIG__?.VITE_SUB2API_BASE_URL || '').trim()
+}
+
+const readViteSub2ApiBaseUrl = () => {
+  const viteEnv = typeof import.meta !== 'undefined'
+    ? (import.meta as ImportMeta & { env?: Record<string, unknown> }).env
+    : undefined
+  return String(viteEnv?.VITE_SUB2API_BASE_URL || '').trim()
+}
+
+// Sub2API 生成网关地址。生产环境留空时使用同源代理，开发环境可指向独立 Sub 服务。
+export const SUB2API_BASE_URL = readRuntimeSub2ApiBaseUrl().replace(/\/+$/, '')
+  || readViteSub2ApiBaseUrl().replace(/\/+$/, '')
+
 // 将相对接口路径拼成可请求的完整地址。
 export const buildApiUrl = (path: string) => {
   // 绝对地址直接返回，避免重复拼接。
@@ -41,6 +58,12 @@ export const buildApiUrl = (path: string) => {
 
   // 统一拼出完整接口地址。
   return `${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`
+}
+
+export const buildSub2ApiUrl = (path: string) => {
+  if (/^https?:\/\//i.test(path)) return path
+  if (!SUB2API_BASE_URL) return path
+  return `${SUB2API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`
 }
 
 // 将后端返回的资源地址统一解析成可直接访问的完整地址。

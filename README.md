@@ -1,19 +1,19 @@
 ## ⚠️ 免责声明 (Disclaimer)
 
-本项目（CanvasMind）是一个基于 Vue 3 的**前端交互框架与界面演示原型**，旨在展示无限画布、拖拽交互及 AI 对话界面的技术实现。
+本项目（Duomi AI Studio）是一个基于 Vue 3 的**AI 图片与视频创作工作台学习项目**，保留了上游 CanvasMind 的画布与交互基础。
 
 1. **非官方产品**：本项目**并非**任何商业AI平台（包括但不限于即梦AI、字节跳动旗下产品）的官方软件、破解版或衍生品。项目名称、图标及视觉设计均与上述平台无关。
 2. **仅供学习与研究**：本项目代码以 MIT 协议开源，**仅限于技术学习、研究与个人非商业用途**。开发者不鼓励、不支持任何侵犯第三方知识产权的行为。
 3. **版权与风险提示**：本项目的界面布局、交互逻辑可能涉及第三方（如即梦AI）的独创性设计。**任何个人或组织若将本项目用于商业目的，须自行承担因界面相似性引发的全部版权侵权、不正当竞争等法律风险与后果**。项目原作者（xpnobug）不承担任何连带或赔偿责任。
 4. **使用即同意**：一旦您使用、复制、修改或分发本项目代码，即表示您已阅读并同意本免责声明的所有条款。若您不同意，请立即停止使用并删除本项目。
 
-# CanvasMind
+# Duomi AI Studio
 
 > 一站式 AI 创作与后台运营平台
 
-`CanvasMind` 一个包含 **Vue 3 前台创作端 + Node/Prisma 后台服务 + 管理后台** 的完整项目骨架。
+`Duomi AI Studio` 是一个包含 **Vue 3 创作端 + Node/Prisma 服务 + 云端作品历史** 的独立学习项目。
 
-## 🌟 CanvasMind Pro 版本能力更新上线
+## 🌟 上游 CanvasMind 能力说明
 
 - 支持创建主体，统一管理人物 / 商品等创作主体并在生成链路中@复用
 - 支持支付配置(微信、支付宝)，完善商业化开通与计费相关运营能力
@@ -27,7 +27,7 @@
 - 引入 3D 导演台与运镜控制，提升专业影像表达效率
 - 完善密钥管理、站内通知与生成任务进度浮窗，提升长链路创作可控性
 
-普通版本：https://github.com/xpnobug/CanvasMind  
+上游项目：https://github.com/xpnobug/CanvasMind
 Pro 版本对比：https://reaicc.com/pricing
 
 🎉 欢迎前往站点体验：https://reaicc.com/  
@@ -151,7 +151,7 @@ REDIS_HOST=127.0.0.1
 REDIS_PORT=6379
 REDIS_PASSWORD=
 REDIS_DATABASE=1
-REDIS_PREFIX=canana
+REDIS_PREFIX=duomi-ai-studio
 REDIS_ENV=development
 REDIS_URL=
 REDIS_DEFAULT_TTL_SECONDS=60
@@ -263,15 +263,18 @@ npm run start
 - `Dockerfile`
 - `docker-compose.yml`
 
+正式版本发布使用 Git tag 和 GHCR，完整流程见 [`deploy/README.md`](deploy/README.md)。推送与 `package.json` 版本一致的 `v*` 标签后，GitHub Actions 会构建多架构镜像并通过 SSH 更新服务器；回滚时可在 `Duomi AI Studio 手动部署` workflow 中选择已有镜像 tag。
+
 ### 推荐最小环境变量
 
 ```env
-APP_PORT=5409
+SERVER_PORT=5409
+VITE_BASE_PATH=/duomi-studio/
 VITE_API_BASE_URL=https://你的域名或接口地址
 STATIC_DIST_DIR=/app/dist
 UPLOADS_DIR=/app/uploads
 CORS_ALLOWED_ORIGINS=https://你的前端域名
-DATABASE_URL=mysql://用户名:密码@数据库地址:3306/canana_mind
+DATABASE_URL=mysql://用户名:密码@数据库地址:3306/duomi_ai_studio
 PROVIDER_CONFIG_SECRET=请替换成你自己的密钥
 STORAGE_CONFIG_SECRET=
 AUTH_LOGIN_CODE_EXPIRE_MINUTES=5
@@ -281,7 +284,7 @@ REDIS_HOST=redis
 REDIS_PORT=6379
 REDIS_PASSWORD=
 REDIS_DATABASE=1
-REDIS_PREFIX=canana
+REDIS_PREFIX=duomi-ai-studio
 REDIS_ENV=production
 REDIS_URL=
 ```
@@ -296,8 +299,8 @@ docker compose up -d --force-recreate --remove-orphans
 如果需要本机构建镜像：
 
 ```bash
-docker build -t canana-vue:latest .
-docker compose up -d --force-recreate --remove-orphans
+docker build -t duomi-ai-studio:latest .
+DUOMI_IMAGE=duomi-ai-studio:latest docker compose up -d --force-recreate --remove-orphans
 ```
 
 ## 🧩 常用脚本
@@ -316,7 +319,7 @@ npm run prisma:migrate:deploy
 ## 🗂️ 当前项目结构
 
 ```text
-canana-vue/
+duomi-ai-studio/
 ├── src/                              # Vue 3 前端
 │   ├── api/                          # 前端 API 封装（含 admin/ai-gateway/storage/...）
 │   ├── components/                   # 公共组件 + 业务组件
@@ -330,7 +333,7 @@ canana-vue/
 │   └── views/
 │       ├── generate/                 # 创作与生成页面
 │       ├── workflow/                 # 可视化工作流（components/composables/config/api）
-│       ├── canana/                   # 无限画布
+│       ├── canana/                   # 无限画布（上游目录名）
 │       ├── home/                     # 首页
 │       ├── account/                  # 账户中心
 │       ├── publish/                  # 发布中心
@@ -534,4 +537,4 @@ MIT
 - [Dreamina](https://www.capcut.com/ai-tool/platform) - 剪映AI创作工具
 ---
 
-**CanvasMind** - 让 AI 创作更简单 🎨✨
+**Duomi AI Studio** - 图片与视频 AI 创作学习工作台

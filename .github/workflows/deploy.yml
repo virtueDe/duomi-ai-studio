@@ -1,141 +1,81 @@
-name: Docker 部署
+name: Duomi AI Studio 手动部署
 
 on:
-  workflow_run:
-    workflows:
-      - Docker 镜像发布
-    types:
-      - completed
   workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'GHCR 镜像 tag，例如 0.1.0 或 latest'
+        required: true
+        default: latest
+        type: string
+
+permissions:
+  contents: read
 
 jobs:
   deploy:
-    name: 拉取最新镜像并重启容器
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    name: 部署指定 Duomi 镜像
     runs-on: ubuntu-latest
-
+    env:
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+      DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+      DEPLOY_DIR: ${{ secrets.DUOMI_DEPLOY_DIR || '/opt/proxy/duomi-studio' }}
+      DEPLOY_COMPOSE_FILE: ${{ secrets.DUOMI_DEPLOY_COMPOSE_FILE || 'docker-compose.duomi.yml' }}
+      GHCR_DEPLOY_USERNAME: ${{ secrets.GHCR_DEPLOY_USERNAME }}
+      GHCR_DEPLOY_TOKEN: ${{ secrets.GHCR_DEPLOY_TOKEN }}
+      RELEASE_IMAGE: ghcr.io/virtuede/duomi-ai-studio:${{ inputs.image_tag }}
     steps:
-      - name: 检出代码
+      - name: 检出部署文件
         uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            deploy/docker-compose.duomi.yml
+            deploy/remote-deploy.sh
+          sparse-checkout-cone-mode: false
 
-      - name: 校验部署密钥
+      - name: 校验部署配置
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        shell: bash
         run: |
-          if [ -z "${{ secrets.SERVER_HOST }}" ]; then
-            echo "缺少 GitHub Secrets: SERVER_HOST"
-            exit 1
-          fi
+          set -euo pipefail
+          test -n "$DEPLOY_HOST" || { echo "缺少 DEPLOY_HOST" >&2; exit 1; }
+          test -n "$DEPLOY_USER" || { echo "缺少 DEPLOY_USER" >&2; exit 1; }
+          test -n "$DEPLOY_SSH_KEY" || { echo "缺少 DEPLOY_SSH_KEY" >&2; exit 1; }
+          test -n "$DEPLOY_KNOWN_HOSTS" || { echo "缺少 DEPLOY_KNOWN_HOSTS" >&2; exit 1; }
 
-          if [ -z "${{ secrets.SERVER_USERNAME }}" ]; then
-            echo "缺少 GitHub Secrets: SERVER_USERNAME"
-            exit 1
-          fi
-
-          if [ -z "${{ secrets.SERVER_SSH_KEY }}" ]; then
-            echo "缺少 GitHub Secrets: SERVER_SSH_KEY"
-            exit 1
-          fi
-
-          if [ -z "${{ secrets.DEPLOY_PATH }}" ]; then
-            echo "缺少 GitHub Secrets: DEPLOY_PATH"
-            exit 1
-          fi
-
-          if [ -z "${{ secrets.DATABASE_URL }}" ]; then
-            echo "缺少 GitHub Secrets: DATABASE_URL"
-            exit 1
-          fi
-
-          if [ -z "${{ secrets.PROVIDER_CONFIG_SECRET }}" ]; then
-            echo "缺少 GitHub Secrets: PROVIDER_CONFIG_SECRET"
-            exit 1
-          fi
-
-          if [ -z "${{ secrets.VITE_API_BASE_URL }}" ]; then
-            echo "缺少 GitHub Secrets: VITE_API_BASE_URL"
-            exit 1
-          fi
-
-          if [ -z "${{ secrets.CORS_ALLOWED_ORIGINS }}" ]; then
-            echo "缺少 GitHub Secrets: CORS_ALLOWED_ORIGINS"
-            exit 1
-          fi
-
-      - name: 初始化部署目录
-        uses: appleboy/ssh-action@v1.0.3
+      - name: 配置 SSH
+        uses: webfactory/ssh-agent@v0.9.0
         with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USERNAME }}
-          key: ${{ secrets.SERVER_SSH_KEY }}
-          port: ${{ secrets.SERVER_PORT || 22 }}
-          script: |
-            set -eux
-            DEPLOY_DIR="${{ secrets.DEPLOY_PATH }}"
-            mkdir -p "$DEPLOY_DIR"
+          ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
 
-      - name: 上传 docker-compose.yml
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USERNAME }}
-          key: ${{ secrets.SERVER_SSH_KEY }}
-          port: ${{ secrets.SERVER_PORT || 22 }}
-          source: docker-compose.yml
-          target: ${{ secrets.DEPLOY_PATH }}
-          strip_components: 0
-
-      - name: 通过 SSH 部署 Docker 容器
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USERNAME }}
-          key: ${{ secrets.SERVER_SSH_KEY }}
-          port: ${{ secrets.SERVER_PORT || 22 }}
-          script: |
-            set -eux
-
-            DEPLOY_DIR="${{ secrets.DEPLOY_PATH }}"
-            mkdir -p "$DEPLOY_DIR"
-            cd "$DEPLOY_DIR"
-
-            cat > .env <<'EOF'
-            SERVER_PORT=5409
-            VITE_API_BASE_URL=${{ secrets.VITE_API_BASE_URL }}
-            VITE_PROVIDER_DEFAULT_BASE_URL=https://api.chatfire.site/v1
-            STATIC_DIST_DIR=/app/dist
-            UPLOADS_DIR=/app/uploads
-            CORS_ALLOWED_ORIGINS=${{ secrets.CORS_ALLOWED_ORIGINS }}
-            DATABASE_URL=${{ secrets.DATABASE_URL }}
-            PROVIDER_CONFIG_SECRET=${{ secrets.PROVIDER_CONFIG_SECRET }}
-            STORAGE_CONFIG_SECRET=${{ secrets.STORAGE_CONFIG_SECRET }}
-            REDIS_ENABLED=${{ secrets.REDIS_ENABLED }}
-            REDIS_HOST=${{ secrets.REDIS_HOST }}
-            REDIS_PORT=${{ secrets.REDIS_PORT }}
-            REDIS_PASSWORD=${{ secrets.REDIS_PASSWORD }}
-            REDIS_DATABASE=${{ secrets.REDIS_DATABASE }}
-            REDIS_PREFIX=canana
-            REDIS_ENV=production
-            REDIS_DEFAULT_TTL_SECONDS=60
-            REDIS_TASK_RUNTIME_TTL_SECONDS=1800
-            REDIS_TASK_SNAPSHOT_TTL_SECONDS=1800
-            REDIS_TASK_ABORT_TTL_SECONDS=300
-            REDIS_TASK_LOCK_TTL_MS=30000
-            AUTH_LOGIN_CODE_EXPIRE_MINUTES=5
-            AUTH_SESSION_EXPIRE_DAYS=30
-            EOF
-            
-            ls -la
-            # 清理历史遗留的同名容器，避免旧部署方式残留导致 compose 重建失败。
-            docker rm -f canana-vue-app || true
-            docker compose pull
-            docker compose up -d --force-recreate --remove-orphans
-            docker image prune -f
-            docker ps
-
-      - name: 发送部署通知
-        if: always()
+      - name: 写入可信主机指纹
+        env:
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        shell: bash
         run: |
-          if [ "${{ job.status }}" = "success" ]; then
-            echo "✅ Docker 部署成功！"
-          else
-            echo "❌ Docker 部署失败！"
-          fi
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: 登录服务器 GHCR
+        if: ${{ env.GHCR_DEPLOY_TOKEN != '' }}
+        shell: bash
+        run: |
+          remote_login_cmd="docker login ghcr.io --username $(printf '%q' "$GHCR_DEPLOY_USERNAME") --password-stdin"
+          printf '%s' "$GHCR_DEPLOY_TOKEN" | ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "$remote_login_cmd"
+
+      - name: 上传 Compose 文件
+        shell: bash
+        run: |
+          remote_dir=$(printf '%q' "$DEPLOY_DIR")
+          remote_compose=$(printf '%q' "$DEPLOY_DIR/$DEPLOY_COMPOSE_FILE")
+          ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p -- ${remote_dir} && cat > ${remote_compose}" < deploy/docker-compose.duomi.yml
+
+      - name: 部署指定镜像
+        shell: bash
+        run: |
+          remote_args=$(printf '%q ' "$DEPLOY_DIR" "$DEPLOY_COMPOSE_FILE" "$RELEASE_IMAGE")
+          ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "bash -s -- ${remote_args}" < deploy/remote-deploy.sh

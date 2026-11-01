@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import Header from '@components/canana/Header.vue'
 import LeftToolbar from '@components/canana/LeftToolbar.vue'
 import InfiniteCanvas from '@components/canana/InfiniteCanvas.vue'
@@ -7,9 +7,24 @@ import BottomToolbar from '@components/canana/BottomToolbar.vue'
 import ContentGenerator from '@/components/generate/ContentGenerator.vue'
 import RightPanel from '@components/canana/RightPanel.vue'
 import CanvasEmptyState from '@components/canana/CanvasEmptyState.vue'
+import { useSub2ApiStore } from '@/stores/sub2api'
+
+const props = defineProps({
+  gatewayMode: { type: String, default: 'canvas' },
+})
+
+const sub2ApiStore = useSub2ApiStore()
+const duomiApiKeys = computed(() => sub2ApiStore.keys.value.map(({ id, name, groupName }) => ({ id, name, groupName })))
+const duomiImageModels = computed(() => sub2ApiStore.imageModels.value.map(model => ({ value: model.id, label: model.label })))
+const duomiVideoModels = computed(() => sub2ApiStore.videoModels.value.map(model => ({ value: model.id, label: model.label })))
+const duomiCreationTypes = computed(() => [
+  ...(duomiImageModels.value.length ? ['image'] : []),
+  ...(duomiVideoModels.value.length ? ['video'] : []),
+])
+const duomiInitialCreationType = computed(() => duomiCreationTypes.value.includes('image') ? 'image' : 'video')
 
 const zoom = ref(10)
-const projectTitle = ref('生成二次元手办多风格图片')
+const projectTitle = ref(props.gatewayMode === 'duomi' ? 'Duomi AI Studio' : '生成二次元手办多风格图片')
 const rightPanelOpen = ref(false)
 const selectedImage = ref(null)
 const canvasRef = ref(null)
@@ -56,9 +71,24 @@ const handleAssetSelected = (assets) => {
   }
 }
 
+const handleAddToCanvas = async (asset) => {
+  const url = String(asset?.url || '').trim()
+  if (!url) return
+  canvasCreated.value = true
+  await nextTick()
+  await canvasRef.value?.addImages([{ url }])
+}
+
 // 处理中间底部发送的消息
 const pendingMessage = ref('')
-const handlePromptSend = (message, type) => {
+const pendingRequest = ref(null)
+const handlePromptSend = (message, type, options) => {
+  if (props.gatewayMode === 'duomi') {
+    pendingRequest.value = { id: Date.now(), prompt: message, type, options }
+    rightPanelOpen.value = true
+    return
+  }
+
   pendingMessage.value = message
   rightPanelOpen.value = true
   // 创建画布并生成图片
@@ -82,8 +112,13 @@ const handlePromptSend = (message, type) => {
           <!-- 顶部栏 -->
           <Header
               :title="projectTitle"
+              :gateway-mode="props.gatewayMode"
+              :api-keys="duomiApiKeys"
+              :active-api-key-id="sub2ApiStore.activeKeyId.value"
+              :models-loading="sub2ApiStore.modelsLoading.value"
               @update:title="projectTitle = $event"
               @toggle-panel="toggleRightPanel"
+              @select-api-key="sub2ApiStore.selectKey"
           />
 
           <!-- 主内容区 -->
@@ -162,8 +197,13 @@ const handlePromptSend = (message, type) => {
           v-show="!rightPanelOpen"
           class="canvas-content-generator"
           :collapsible="true"
-          :default-expanded="false"
+          :default-expanded="props.gatewayMode === 'duomi'"
           popup-placement="top"
+          :skip-canvas-auth="props.gatewayMode === 'duomi'"
+          :allowed-creation-types="props.gatewayMode === 'duomi' ? duomiCreationTypes : undefined"
+          :initial-creation-type="props.gatewayMode === 'duomi' ? duomiInitialCreationType : undefined"
+          :duomi-image-models="props.gatewayMode === 'duomi' ? duomiImageModels : undefined"
+          :duomi-video-models="props.gatewayMode === 'duomi' ? duomiVideoModels : undefined"
           @send="handlePromptSend"
         />
       </div>
@@ -177,8 +217,12 @@ const handlePromptSend = (message, type) => {
             :title="projectTitle"
             :visible="rightPanelOpen"
             :initial-message="pendingMessage"
+            :initial-request="pendingRequest"
+            :gateway-mode="props.gatewayMode"
             @close="rightPanelOpen = false"
             @message-received="pendingMessage = ''"
+            @request-received="pendingRequest = null"
+            @add-image-to-canvas="handleAddToCanvas"
         />
       </aside>
     </div>

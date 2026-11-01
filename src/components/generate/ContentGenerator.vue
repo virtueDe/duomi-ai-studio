@@ -53,6 +53,12 @@ interface Props {
   externalReferenceImages?: string[]
   /** 强制工具栏显示文字（默认 sidebar 走 icon-only=true，节点下方传 true 时还原为带文字模式） */
   verboseToolbar?: boolean
+  /** Duomi 由 Sub2API 登录态负责鉴权时，跳过 CanvasMind 自有登录弹窗。 */
+  skipCanvasAuth?: boolean
+  /** Duomi 模式只展示当前 Sub API Key 分组允许的生成类型。 */
+  allowedCreationTypes?: CreationType[]
+  duomiImageModels?: Array<{ value: string; label: string }>
+  duomiVideoModels?: Array<{ value: string; label: string }>
 }
 
 interface GeneratorSendOptions {
@@ -116,6 +122,10 @@ const props = withDefaults(defineProps<Props>(), {
   hideImageUpload: false,
   externalReferenceImages: () => [],
   verboseToolbar: false,
+  skipCanvasAuth: false,
+  allowedCreationTypes: undefined,
+  duomiImageModels: undefined,
+  duomiVideoModels: undefined,
 })
 
 // 事件定义
@@ -176,6 +186,16 @@ const conversationEntrySettings = computed(() => publicSystemSettings.value.conv
 const inputSettings = computed(() => conversationEntrySettings.value.input)
 const workbenchSettings = computed(() => conversationEntrySettings.value.workbench)
 const availableModeOptions = computed(() => {
+  if (props.allowedCreationTypes) {
+    const labels: Partial<Record<CreationType, string>> = {
+      image: '图片生成',
+      video: '视频生成',
+    }
+    return props.allowedCreationTypes
+      .filter((value): value is CreationType => value === 'image' || value === 'video')
+      .map(value => ({ value, label: labels[value] || value }))
+  }
+
   const options = Array.isArray(conversationEntrySettings.value?.mode?.options)
     ? conversationEntrySettings.value.mode.options
     : []
@@ -332,7 +352,7 @@ const handleSubmit = () => {
   if (!message) return
 
   // 未登录时直接弹出登录框，并保留当前输入内容。
-  if (!authStore.isLoggedIn.value) {
+  if (!props.skipCanvasAuth && !authStore.isLoggedIn.value) {
     openLoginModal('content-generator-submit')
     return
   }
@@ -355,10 +375,12 @@ const handleSubmit = () => {
     const sizeConfig = toolbar.getCurrentSizeConfig()
     emit('send', message, currentType.value, {
       model: toolbar.getCurrentModelLabel(),
+      modelKey: toolbar.currentModelVersion,
       ratio: toolbar.currentSize,
       resolution: sizeConfig.quality,
       duration: toolbar.currentDuration,
-      feature: toolbar.currentFeature
+      feature: toolbar.currentFeature,
+      referenceImages: [videoFirstFrameImage.value, videoLastFrameImage.value].filter(Boolean),
     })
   } else if (currentType.value === 'agent') {
     const toolbar = agentToolbarExpandRef.value || agentToolbarRef.value
@@ -508,7 +530,7 @@ const promptControlHeight = computed(() => {
 
 // 判断是否显示价格信息
 const showPrice = computed(() => {
-  return !isCollapsed.value && (currentType.value === 'image' || currentType.value === 'video')
+  return !props.skipCanvasAuth && !isCollapsed.value && (currentType.value === 'image' || currentType.value === 'video')
 })
 
 // 获取价格文本
@@ -1185,6 +1207,7 @@ onUnmounted(() => {
 
               <!-- Agent 工具栏（折叠状态下显示） -->
               <AgentToolbar
+                v-if="currentType === 'agent'"
                 ref="agentToolbarRef"
                 :placement="popupPlacement"
                 :show-model-selector="conversationEntrySettings.modelSelector.enabled"
@@ -1255,10 +1278,10 @@ onUnmounted(() => {
               />
 
               <!-- 图片生成工具栏 -->
-              <ImageToolbar v-else-if="currentType === 'image'" ref="imageToolbarRef" :placement="popupPlacement" :icon-only="isSidebar && !verboseToolbar" />
+              <ImageToolbar v-else-if="currentType === 'image'" ref="imageToolbarRef" :placement="popupPlacement" :icon-only="isSidebar && !verboseToolbar" :models="duomiImageModels" />
 
               <!-- 视频生成工具栏 -->
-              <VideoToolbar v-else-if="currentType === 'video'" ref="videoToolbarRef" :placement="popupPlacement" :icon-only="isSidebar && !verboseToolbar" />
+              <VideoToolbar v-else-if="currentType === 'video'" ref="videoToolbarRef" :placement="popupPlacement" :icon-only="isSidebar && !verboseToolbar" :models="duomiVideoModels" />
 
               <!-- 数字人/动作模仿工具栏 -->
               <DigitalHumanToolbar v-else :placement="popupPlacement" :icon-only="isSidebar && !verboseToolbar" />

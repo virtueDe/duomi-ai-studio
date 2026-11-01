@@ -16,14 +16,29 @@ import {
 } from '@/config/models'
 import { appendImageReferencesToRequestBody } from '@/shared/image-generation-request'
 import { useAssistantSessions } from '@/composables/useAssistantSessions'
+import { generateDuomiImage, generateDuomiVideo } from '@/api/duomi-generation'
+import { requestSub2ApiBlob } from '@/api/sub2api'
+import { createDuomiGeneration, deleteDuomiGeneration, listDuomiGenerations } from '@/api/duomi-studio'
+import { useSub2ApiStore } from '@/stores/sub2api'
+import { Delete } from '@element-plus/icons-vue'
 
 const props = defineProps({
   title: { type: String, default: '' },
   visible: { type: Boolean, default: false },
-  initialMessage: { type: String, default: '' }
+  initialMessage: { type: String, default: '' },
+  initialRequest: { type: Object, default: null },
+  gatewayMode: { type: String, default: 'canvas' },
 })
 
-const emit = defineEmits(['close', 'message-received', 'add-image-to-canvas'])
+const emit = defineEmits(['close', 'message-received', 'request-received', 'add-image-to-canvas'])
+const isDuomi = computed(() => props.gatewayMode === 'duomi')
+const sub2ApiStore = useSub2ApiStore()
+const duomiImageModelOptions = computed(() => sub2ApiStore.imageModels.value.map(model => ({ value: model.id, label: model.label })))
+const duomiVideoModelOptions = computed(() => sub2ApiStore.videoModels.value.map(model => ({ value: model.id, label: model.label })))
+const duomiCreationTypes = computed(() => [
+  ...(duomiImageModelOptions.value.length ? ['image'] : []),
+  ...(duomiVideoModelOptions.value.length ? ['video'] : []),
+])
 
 // 会话列表（与 /generate 通过 source='canvas-assistant' 物理隔离）
 const {
@@ -41,7 +56,7 @@ const {
 
 const sessionListVisible = ref(false)
 const sessionListAnchor = ref(null)
-const headerTitleText = computed(() => activeSession.value?.title || props.title || '未命名对话')
+const headerTitleText = computed(() => isDuomi.value ? props.title || 'Duomi AI Studio' : activeSession.value?.title || props.title || '未命名对话')
 
 const openSessionList = () => {
   sessionListVisible.value = !sessionListVisible.value
@@ -127,9 +142,16 @@ const lastImageOptions = ref({})
 
 // 跟踪进行中的流式请求，用于卸载时统一 abort
 const activeStreams = []
+const duomiBlobUrls = new Set()
+let duomiHasLocalActivity = false
 
 const registerStream = (controller) => {
   activeStreams.push(controller)
+}
+
+const unregisterStream = (controller) => {
+  const index = activeStreams.indexOf(controller)
+  if (index >= 0) activeStreams.splice(index, 1)
 }
 
 const cleanupStreams = () => {
@@ -137,9 +159,17 @@ const cleanupStreams = () => {
     const c = activeStreams.shift()
     try { c?.abort() } catch { /* ignore */ }
   }
+  for (const url of duomiBlobUrls) {
+    try { URL.revokeObjectURL(url) } catch { /* ignore */ }
+  }
+  duomiBlobUrls.clear()
 }
 
 onMounted(() => {
+  if (isDuomi.value) {
+    void loadDuomiHistory()
+    return
+  }
   // 后台拉取模型清单（getDefault*ModelKey 依赖此调用）
   void loadPublicModelCatalog()
   // 拉取助手会话列表（首次会自动建默认会话），然后加载当前会话历史
@@ -226,6 +256,67 @@ const loadSessionHistory = async (sessionId) => {
     scrollToBottom()
   } catch (err) {
     console.error('[RightPanel] loadSessionHistory failed', err)
+  }
+}
+
+const loadDuomiHistory = async () => {
+  try {
+    const response = await listDuomiGenerations()
+    // 用户已开始新的生成时，不能用较早发出的历史请求覆盖当前消息。
+    if (duomiHasLocalActivity) return
+    const rows = Array.isArray(response?.items) ? response.items : []
+    messages.value = rows.slice().reverse().flatMap((record) => {
+      const urls = Array.isArray(record.resultUrls) ? record.resultUrls : []
+      const kind = record.kind === 'VIDEO' ? 'video' : 'image'
+      const resultMessage = kind === 'video'
+        ? {
+            id: `${record.id}-result`,
+            recordId: record.id,
+            type: 'ai-video',
+            url: urls[0] || '',
+            contentPath: record.contentPath || '',
+            expiresAt: record.expiresAt,
+            loading: ['PENDING', 'RUNNING'].includes(record.status),
+            error: record.errorMessage || '',
+          }
+        : {
+            id: `${record.id}-result`,
+            recordId: record.id,
+            type: 'ai-images',
+            summary: (record.prompt || '图片生成').slice(0, 10),
+            collapsed: false,
+            images: urls,
+            totalCount: urls.length,
+            expiresAt: record.expiresAt,
+            loading: ['PENDING', 'RUNNING'].includes(record.status),
+            error: record.errorMessage || '',
+          }
+      return [
+        { id: `${record.id}-prompt`, recordId: record.id, type: 'user', content: record.prompt || '' },
+        resultMessage,
+      ]
+    })
+    hasMessages.value = messages.value.length > 0
+    void hydrateDuomiVideoHistory()
+    scrollToBottom()
+  } catch (err) {
+    console.error('[RightPanel] load Duomi history failed', err)
+  }
+}
+
+const hydrateDuomiVideoHistory = async () => {
+  const key = sub2ApiStore.activeKey.value
+  if (!key) return
+  const pending = messages.value.filter(message => message.type === 'ai-video' && message.contentPath && !message.url)
+  for (const message of pending) {
+    try {
+      const blob = await requestSub2ApiBlob(message.contentPath, key.key)
+      const url = URL.createObjectURL(blob)
+      duomiBlobUrls.add(url)
+      message.url = url
+    } catch (error) {
+      message.error = error?.message || '视频内容已无法从 Sub2API 恢复，请重新生成。'
+    }
   }
 }
 
@@ -464,6 +555,161 @@ const runChatStream = async (prompt, aiMsg) => {
   }
 }
 
+const saveDuomiHistory = async ({ kind, model, prompt, status, resultUrls = [], contentPath = '', errorMessage = '' }) => {
+  try {
+    return await createDuomiGeneration({ kind, model, prompt, status, resultUrls, contentPath, errorMessage })
+  } catch (error) {
+    console.error('[RightPanel] save Duomi history failed', error)
+    return { saveError: error?.message || '云端作品历史保存失败' }
+  }
+}
+
+const removeDuomiGeneration = async (recordId) => {
+  if (!recordId || !window.confirm('删除这条云端作品记录？')) return
+  try {
+    await deleteDuomiGeneration(recordId)
+    const removedMessages = messages.value.filter(message =>
+      message.recordId === recordId || String(message.id).startsWith(`${recordId}-`),
+    )
+    for (const message of removedMessages) {
+      if (message.url && duomiBlobUrls.has(message.url)) {
+        URL.revokeObjectURL(message.url)
+        duomiBlobUrls.delete(message.url)
+      }
+    }
+    messages.value = messages.value.filter(message =>
+      message.recordId !== recordId && !String(message.id).startsWith(`${recordId}-`),
+    )
+    hasMessages.value = messages.value.length > 0
+  } catch (error) {
+    window.alert(error?.message || '删除作品记录失败')
+  }
+}
+
+const attachDuomiRecordId = (aiMsg, recordId) => {
+  aiMsg.recordId = recordId
+  const promptMessage = messages.value.find(message => message.id === aiMsg.promptMessageId)
+  if (promptMessage) promptMessage.recordId = recordId
+}
+
+const runDuomiImageGeneration = async (prompt, refImages, aiMsg) => {
+  const options = lastImageOptions.value || {}
+  const model = String(options.modelKey || options.model || '').trim()
+  const key = sub2ApiStore.activeKey.value
+  const controller = new AbortController()
+  registerStream(controller)
+
+  try {
+    if (!key?.supportsImage) throw new Error('当前 API Key 所属分组不支持图片生成。')
+    if (!model) throw new Error('当前 API Key 分组没有可用的图片模型。')
+    if (!sub2ApiStore.imageModels.value.some(item => item.id === model)) {
+      throw new Error('所选图片模型不属于当前 API Key 分组，请重新选择。')
+    }
+    const references = (Array.isArray(refImages) ? refImages : []).filter(isRasterReferenceUrl)
+    if (references.length !== (Array.isArray(refImages) ? refImages.length : 0)) {
+      aiMsg.notice = '已忽略不支持的参考图片格式。'
+    }
+    const result = await generateDuomiImage(key.key, {
+      model,
+      prompt,
+      count: Math.max(1, Math.min(8, Number(options.count) || 1)),
+      size: String(options.ratio || options.size || '').trim() || undefined,
+      quality: String(options.resolution || options.quality || '').trim() || undefined,
+      referenceImages: references,
+      signal: controller.signal,
+    })
+    aiMsg.images = result.images
+    aiMsg.totalCount = result.images.length
+    aiMsg.loading = false
+    aiMsg.expiresAt = result.images.some(url => /^https?:\/\//i.test(url))
+      ? new Date(Date.now() + 60 * 60 * 1000).toISOString()
+      : null
+    const saved = await saveDuomiHistory({
+      kind: 'IMAGE',
+      model,
+      prompt,
+      status: 'COMPLETED',
+      resultUrls: result.images,
+    })
+    if (saved?.id) {
+      attachDuomiRecordId(aiMsg, saved.id)
+      aiMsg.expiresAt = saved.expiresAt
+    } else if (saved?.saveError) {
+      aiMsg.historyError = saved.saveError
+    }
+  } catch (error) {
+    if (error?.name === 'AbortError') return
+    aiMsg.error = error?.message || '图片生成失败'
+    aiMsg.loading = false
+    if (model && prompt) {
+      const saved = await saveDuomiHistory({ kind: 'IMAGE', model, prompt, status: 'FAILED', errorMessage: aiMsg.error })
+      if (saved?.id) attachDuomiRecordId(aiMsg, saved.id)
+      if (saved?.saveError) aiMsg.historyError = saved.saveError
+    }
+  } finally {
+    unregisterStream(controller)
+    scrollToBottom()
+  }
+}
+
+const runDuomiVideoGeneration = async (prompt, refImages, aiMsg) => {
+  const options = lastImageOptions.value || {}
+  const model = String(options.modelKey || options.model || '').trim()
+  const key = sub2ApiStore.activeKey.value
+  const controller = new AbortController()
+  registerStream(controller)
+
+  try {
+    if (!key?.supportsVideo) throw new Error('当前 API Key 所属分组不支持视频生成。')
+    if (!model) throw new Error('当前 API Key 分组没有可用的视频模型。')
+    if (!sub2ApiStore.videoModels.value.some(item => item.id === model)) {
+      throw new Error('所选视频模型不属于当前 API Key 分组，请重新选择。')
+    }
+    if (Array.isArray(refImages) && refImages.length > 1) {
+      aiMsg.notice = 'Sub2API 统一视频接口当前仅接收一张首帧参考图，已忽略其他帧。'
+    }
+    const result = await generateDuomiVideo(key.key, {
+      model,
+      prompt,
+      ratio: String(options.ratio || '').trim() || undefined,
+      resolution: String(options.resolution || '').trim() || undefined,
+      duration: String(options.duration || '').trim() || undefined,
+      referenceImages: Array.isArray(refImages) ? refImages : [],
+      signal: controller.signal,
+    })
+    aiMsg.url = result.url
+    if (result.url.startsWith('blob:')) duomiBlobUrls.add(result.url)
+    aiMsg.loading = false
+    const saved = await saveDuomiHistory({
+      kind: 'VIDEO',
+      model,
+      prompt,
+      status: 'COMPLETED',
+      resultUrls: [result.url],
+      contentPath: result.contentPath,
+    })
+    if (saved?.id) {
+      attachDuomiRecordId(aiMsg, saved.id)
+      aiMsg.expiresAt = saved.expiresAt
+    } else {
+      aiMsg.expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString()
+      if (saved?.saveError) aiMsg.historyError = saved.saveError
+    }
+  } catch (error) {
+    if (error?.name === 'AbortError') return
+    aiMsg.error = error?.message || '视频生成失败'
+    aiMsg.loading = false
+    if (model && prompt) {
+      const saved = await saveDuomiHistory({ kind: 'VIDEO', model, prompt, status: 'FAILED', errorMessage: aiMsg.error })
+      if (saved?.id) attachDuomiRecordId(aiMsg, saved.id)
+      if (saved?.saveError) aiMsg.historyError = saved.saveError
+    }
+  } finally {
+    unregisterStream(controller)
+    scrollToBottom()
+  }
+}
+
 // 发送消息
 const sendMessage = async () => {
   const content = inputMessage.value.trim()
@@ -471,12 +717,14 @@ const sendMessage = async () => {
 
   if (!content && !hasImagesLocal) return
 
-  // 确保有活跃会话（首次发送会自动定位到默认会话）
-  try {
-    await ensureSession()
-  } catch (err) {
-    console.error('[RightPanel] ensureSession failed', err)
-    return
+  if (!isDuomi.value) {
+    // CanvasMind 会话仍沿用原有持久化流程。
+    try {
+      await ensureSession()
+    } catch (err) {
+      console.error('[RightPanel] ensureSession failed', err)
+      return
+    }
   }
 
   hasMessages.value = true
@@ -503,6 +751,49 @@ const sendMessage = async () => {
   inputMessage.value = ''
   uploadedImages.value = []
   scrollToBottom()
+
+  if (isDuomi.value) {
+    duomiHasLocalActivity = true
+    if (lastCreationType.value === 'image') {
+      messages.value.push({
+        id: userId + 1,
+        promptMessageId: userId,
+        type: 'ai-images',
+        summary: (content || '图片生成').slice(0, 10) + (content.length > 10 ? '...' : ''),
+        collapsed: false,
+        images: [],
+        totalCount: 0,
+        loading: true,
+        error: '',
+        notice: '',
+      })
+      await runDuomiImageGeneration(content || '请根据参考图生成', refImages, tailMessage())
+      return
+    }
+
+    if (lastCreationType.value === 'video') {
+      messages.value.push({
+        id: userId + 1,
+        promptMessageId: userId,
+        type: 'ai-video',
+        url: '',
+        loading: true,
+        error: '',
+        notice: '',
+      })
+      await runDuomiVideoGeneration(content || '请根据参考图生成视频', refImages, tailMessage())
+      return
+    }
+
+    messages.value.push({
+      id: userId + 1,
+      type: 'ai-text',
+      content: '',
+      loading: false,
+      error: 'Duomi Studio 当前仅支持图片和视频生成。',
+    })
+    return
+  }
 
   // 路由到对应模型 API：有参考图 / 显式选 image → 图片生成；否则走文本对话
   const goImage = hasImagesLocal || lastCreationType.value === 'image'
@@ -532,6 +823,23 @@ const sendMessage = async () => {
   }
 }
 
+watch(() => props.initialRequest?.id, () => {
+  const request = props.initialRequest
+  if (!isDuomi.value || !request || !String(request.prompt || '').trim()) return
+  inputMessage.value = String(request.prompt)
+  lastCreationType.value = request.type || 'image'
+  lastImageOptions.value = request.options && typeof request.options === 'object' ? request.options : {}
+  uploadedImages.value = Array.isArray(lastImageOptions.value.referenceImages)
+    ? lastImageOptions.value.referenceImages.map((src, index) => ({
+        id: Date.now() + index + Math.random(),
+        src,
+        name: `reference-${index + 1}`,
+      }))
+    : []
+  emit('request-received')
+  void sendMessage()
+}, { immediate: true })
+
 // 处理 ContentGenerator 发送事件
 const handlePromptSend = (message, type, options) => {
   inputMessage.value = message
@@ -557,6 +865,7 @@ const handleKeydown = (e) => {
 
 // 监听从中间底部传来的消息（画布触发的入口）：作为文本对话发起
 watch(() => props.initialMessage, async (newMessage) => {
+  if (isDuomi.value) return
   if (!newMessage || !newMessage.trim()) return
 
   // 确保有活跃会话再发送
@@ -600,13 +909,12 @@ const contentGeneratorHeight = computed(() => hasMessages.value ? 102 : 102)
       <div class="chat-header">
         <div
           ref="sessionListAnchor"
-          class="trigger-container"
-          tabindex="0"
-          role="button"
-          @click="openSessionList"
+          :class="{ 'trigger-container': !isDuomi }"
+          :tabindex="isDuomi ? -1 : 0"
+          @click="!isDuomi && openSessionList()"
         >
           <div class="lv-typography title-vBcivv">{{ headerTitleText }}</div>
-          <div class="arrow-icon-uG49Bu">
+          <div v-if="!isDuomi" class="arrow-icon-uG49Bu">
             <svg width="14" height="14" viewBox="0 0 24 24" preserveAspectRatio="xMidYMid meet" fill="none" role="presentation" xmlns="http://www.w3.org/2000/svg">
               <g>
                 <path data-follow-fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M21.01 7.982A1.2 1.2 0 0 1 21 9.679l-8.156 8.06a1.2 1.2 0 0 1-1.688 0L3 9.68a1.2 1.2 0 0 1 1.687-1.707L12 15.199l7.313-7.227a1.2 1.2 0 0 1 1.697.01Z" fill="currentColor"></path>
@@ -624,7 +932,7 @@ const contentGeneratorHeight = computed(() => hasMessages.value ? 102 : 102)
             </svg>
           </div>-->
           <!-- 新建对话按钮 -->
-          <div class="operation-button-bwA7yT" title="新建对话" @click="handleSessionCreate">
+          <div v-if="!isDuomi" class="operation-button-bwA7yT" title="新建对话" @click="handleSessionCreate">
             <svg width="16" height="16" viewBox="0 0 24 24" preserveAspectRatio="xMidYMid meet" fill="none" role="presentation" xmlns="http://www.w3.org/2000/svg">
               <g>
                 <path data-follow-fill="currentColor" d="M17.5 2.5A4.5 4.5 0 0 1 22 6.998l.004 7.5a4.5 4.5 0 0 1-4.5 4.503h-5.027a1 1 0 0 0-.542.16l-4.15 2.68A1 1 0 0 1 6.241 21v-2.009a4.5 4.5 0 0 1-4.238-4.49L2 7.003A4.5 4.5 0 0 1 6.5 2.5h11Zm-11 2A2.5 2.5 0 0 0 4 7.001l.004 7.501a2.5 2.5 0 0 0 2.5 2.499h.738a1 1 0 0 1 1 1v1.163l2.609-1.684a2.999 2.999 0 0 1 1.626-.479h5.027a2.5 2.5 0 0 0 2.5-2.502L20 6.999A2.5 2.5 0 0 0 17.5 4.5h-11ZM12 7.2a1 1 0 0 1 1 1v1.5h1.5a1 1 0 1 1 0 2H13v1.5a1 1 0 1 1-2 0v-1.5H9.5a1 1 0 1 1 0-2H11V8.2a1 1 0 0 1 1-1Z" fill="currentColor"></path>
@@ -644,6 +952,7 @@ const contentGeneratorHeight = computed(() => hasMessages.value ? 102 : 102)
 
       <!-- 会话列表浮层 -->
       <AssistantSessionList
+        v-if="!isDuomi"
         :visible="sessionListVisible"
         :sessions="assistantSessions"
         :active-id="activeSessionId"
@@ -698,6 +1007,18 @@ const contentGeneratorHeight = computed(() => hasMessages.value ? 102 : 102)
                       <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
                     </svg>
                   </button>
+                  <a
+                    v-if="isDuomi"
+                    class="image-cell-download"
+                    :href="img"
+                    :download="`duomi-image-${idx + 1}`"
+                    title="下载图片"
+                    @click.stop
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                      <path d="M12 3v11m0 0 4-4m-4 4-4-4M5 19h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                  </a>
                   <div v-if="idx === msg.images.length - 1 && msg.totalCount > msg.images.length" class="more-badge">
                     {{ msg.totalCount - msg.images.length }}+
                   </div>
@@ -705,6 +1026,17 @@ const contentGeneratorHeight = computed(() => hasMessages.value ? 102 : 102)
               </div>
               <!-- AI 提示 -->
               <div class="ai-notice">以上内容由 AI 生成</div>
+              <div v-if="msg.notice" class="duomi-expiry-tip">{{ msg.notice }}</div>
+              <div v-if="msg.expiresAt" class="duomi-expiry-tip">上游媒体链接约 1 小时后失效，请尽快下载保存。Duomi 不会自动备份媒体。</div>
+              <div v-if="msg.historyError" class="duomi-history-error">{{ msg.historyError }}</div>
+              <button
+                v-if="isDuomi && msg.recordId"
+                class="duomi-delete-button"
+                type="button"
+                title="删除云端作品"
+                aria-label="删除云端作品"
+                @click.stop="removeDuomiGeneration(msg.recordId)"
+              ><Delete /></button>
               <!-- 操作按钮 -->
 <!--              <div class="action-row">
                 <div class="action-left">
@@ -725,6 +1057,31 @@ const contentGeneratorHeight = computed(() => hasMessages.value ? 102 : 102)
                   </button>
                 </div>
               </div>-->
+            </div>
+          </div>
+
+          <div v-else-if="msg.type === 'ai-video'" class="message-row ai">
+            <div class="duomi-video-result">
+              <div v-if="msg.loading" class="ai-images-loading">
+                <span class="ai-images-spinner" />
+                <span>视频生成中…</span>
+              </div>
+              <div v-else-if="msg.error" class="ai-images-error">{{ msg.error }}</div>
+              <template v-else-if="msg.url">
+                <video :src="msg.url" controls playsinline preload="metadata" />
+                <a :href="msg.url" target="_blank" rel="noopener noreferrer">打开或下载视频</a>
+              </template>
+              <div v-if="msg.notice" class="duomi-expiry-tip">{{ msg.notice }}</div>
+              <div v-if="msg.expiresAt" class="duomi-expiry-tip">上游媒体链接约 1 小时后失效，请尽快下载保存。Duomi 不会自动备份媒体。</div>
+              <div v-if="msg.historyError" class="duomi-history-error">{{ msg.historyError }}</div>
+              <button
+                v-if="isDuomi && msg.recordId"
+                class="duomi-delete-button"
+                type="button"
+                title="删除云端作品"
+                aria-label="删除云端作品"
+                @click.stop="removeDuomiGeneration(msg.recordId)"
+              ><Delete /></button>
             </div>
           </div>
 
@@ -788,6 +1145,11 @@ const contentGeneratorHeight = computed(() => hasMessages.value ? 102 : 102)
         :collapsible="false"
         :default-expanded="true"
         popup-placement="top"
+        :skip-canvas-auth="isDuomi"
+        :allowed-creation-types="isDuomi ? duomiCreationTypes : undefined"
+        :initial-creation-type="isDuomi ? (duomiCreationTypes.includes('image') ? 'image' : 'video') : undefined"
+        :duomi-image-models="isDuomi ? duomiImageModelOptions : undefined"
+        :duomi-video-models="isDuomi ? duomiVideoModelOptions : undefined"
         @send="handlePromptSend"
       />
 
@@ -840,6 +1202,64 @@ const contentGeneratorHeight = computed(() => hasMessages.value ? 102 : 102)
   font-size: 12px;
   padding: 12px 0;
 }
+
+.duomi-expiry-tip,
+.duomi-history-error {
+  font-size: 11px;
+  line-height: 1.5;
+  margin-top: 8px;
+}
+.duomi-expiry-tip { color: var(--text-tertiary); }
+.duomi-history-error { color: #c2410c; }
+.duomi-delete-button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  display: inline-flex;
+  height: 28px;
+  justify-content: center;
+  margin-top: 6px;
+  padding: 4px;
+  width: 28px;
+}
+.duomi-delete-button:hover { color: #dc2626; }
+.duomi-delete-button :deep(svg) { height: 16px; width: 16px; }
+.duomi-video-result {
+  background: var(--bg-block-secondary, rgba(255, 255, 255, 0.04));
+  border-radius: 8px;
+  color: var(--text-primary);
+  max-width: 100%;
+  padding: 10px;
+}
+.duomi-video-result video {
+  background: #111;
+  border-radius: 4px;
+  display: block;
+  max-height: 360px;
+  max-width: min(100%, 360px);
+}
+.duomi-video-result a {
+  color: var(--brand-main-default);
+  display: inline-block;
+  font-size: 12px;
+  margin-top: 8px;
+}
+.image-cell-download {
+  align-items: center;
+  background: rgba(0, 0, 0, 0.58);
+  border-radius: 4px;
+  bottom: 6px;
+  color: #fff;
+  display: inline-flex;
+  height: 24px;
+  justify-content: center;
+  position: absolute;
+  right: 6px;
+  width: 24px;
+}
+.image-cell-download:hover { background: rgba(0, 0, 0, 0.78); }
 
 /* 单图右上角"加入画布" + 按钮 */
 .image-cell {

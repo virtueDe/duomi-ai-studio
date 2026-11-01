@@ -9,6 +9,8 @@ import { isAssetItemsPath } from './asset-items/constants'
 import { handleAssetItemsRequest } from './asset-items/request-handler'
 import { isVideoProjectsPath } from './video-projects/constants'
 import { handleVideoProjectsRequest } from './video-projects/request-handler'
+import { isDuomiStudioPath } from './duomi-studio/constants'
+import { handleDuomiStudioRequest } from './duomi-studio/request-handler'
 import { isAdminUsersPath } from './admin-users/constants'
 import { handleAdminUsersRequest } from './admin-users/request-handler'
 import { isAdminGenerationSessionsPath } from './admin-generation-sessions/constants'
@@ -101,6 +103,7 @@ const readAllowedOrigins = () => {
 // 读取前端运行时公开配置。
 const readRuntimeClientConfig = () => ({
   VITE_API_BASE_URL: String(process.env.VITE_API_BASE_URL || '').trim(),
+  VITE_SUB2API_BASE_URL: String(process.env.VITE_SUB2API_BASE_URL || '').trim(),
   VITE_PROVIDER_DEFAULT_BASE_URL: String(process.env.VITE_PROVIDER_DEFAULT_BASE_URL || 'https://api.chatfire.site/v1').trim(),
 })
 
@@ -241,8 +244,16 @@ const handleStaticRequest = async (req: any, res: any, requestPath: string) => {
   // 将请求路径解码为真实文件路径片段。
   const decodedPath = decodeURIComponent(requestPath || '/')
 
+  // 支持服务直接挂载在 /duomi-studio，也兼容反向代理已剥离前缀的请求。
+  const configuredBasePath = String(process.env.VITE_BASE_PATH || '/').trim()
+  const staticMountPath = configuredBasePath.replace(/\/+$/, '') || '/'
+  const pathWithoutMount = staticMountPath !== '/'
+    && (decodedPath === staticMountPath || decodedPath.startsWith(`${staticMountPath}/`))
+    ? decodedPath.slice(staticMountPath.length) || '/'
+    : decodedPath
+
   // 规范化请求路径，避免目录穿越。
-  const normalizedPath = decodedPath === '/' ? '/index.html' : decodedPath
+  const normalizedPath = pathWithoutMount === '/' ? '/index.html' : pathWithoutMount
 
   // 拼接静态资源目标文件。
   const candidateFilePath = path.resolve(staticDistDir, `.${normalizedPath}`)
@@ -452,6 +463,14 @@ const REQUEST_ROUTE_STRATEGIES: RequestRouteStrategy[] = [
     match: isVideoProjectsPath,
     handle: async (req, res) => {
       await handleVideoProjectsRequest(req, res)
+      return true
+    },
+  },
+  {
+    key: 'duomi-studio',
+    match: isDuomiStudioPath,
+    handle: async (req, res) => {
+      await handleDuomiStudioRequest(req, res)
       return true
     },
   },

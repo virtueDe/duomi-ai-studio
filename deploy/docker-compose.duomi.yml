@@ -1,0 +1,39 @@
+services:
+  app:
+    image: ${DUOMI_IMAGE:?DUOMI_IMAGE is required}
+    container_name: duomi-ai-studio-app
+    restart: unless-stopped
+    env_file:
+      - ${APP_ENV_FILE:-./.env.production}
+    ports:
+      - "127.0.0.1:${SERVER_PORT:-5409}:${SERVER_PORT:-5409}"
+    volumes:
+      - uploads_data:/app/uploads
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:' + (process.env.SERVER_PORT || 5409) + '/api/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  mariadb:
+    image: mariadb:11.4
+    container_name: duomi-ai-studio-mariadb
+    restart: unless-stopped
+    env_file:
+      - ${APP_ENV_FILE:-./.env.production}
+    volumes:
+      - mariadb_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mariadb-admin ping -h 127.0.0.1 -u root -p\"$${MARIADB_ROOT_PASSWORD}\" --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+volumes:
+  uploads_data:
+  mariadb_data:

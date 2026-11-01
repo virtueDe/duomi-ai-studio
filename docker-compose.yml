@@ -1,8 +1,8 @@
 services:
   # 应用服务，同时承载前端与后端。
   app:
-    image: couei/canana-vue:latest
-    container_name: canana-vue-app
+    image: ${DUOMI_IMAGE:-ghcr.io/virtuede/duomi-ai-studio:latest}
+    container_name: duomi-ai-studio-app
     restart: unless-stopped
     env_file:
       # 默认读取 .env.production，可通过 APP_ENV_FILE 覆盖

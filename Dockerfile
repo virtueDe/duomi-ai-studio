@@ -15,7 +15,7 @@ COPY prisma.config.ts ./
 # Prisma 7 在 postinstall 的 prisma generate 阶段会读取 DATABASE_URL，
 # 这里提供一个仅用于生成客户端的占位值，避免镜像构建期因缺少真实数据库配置而失败。
 RUN --mount=type=cache,target=/root/.npm \
-  DATABASE_URL='mysql://root:placeholder@127.0.0.1:3306/canana_mind' \
+  DATABASE_URL='mysql://root:placeholder@127.0.0.1:3306/duomi_ai_studio' \
   npm install --include=dev --no-fund --no-audit
 # ==================== Stage 2: 构建产物 ====================
 FROM --platform=$BUILDPLATFORM node:22-bookworm-slim AS builder
@@ -25,10 +25,14 @@ WORKDIR /app
 
 # 接收前端构建期变量。
 ARG VITE_API_BASE_URL=
+ARG VITE_SUB2API_BASE_URL=
+ARG VITE_BASE_PATH=/duomi-studio/
 ARG VITE_PROVIDER_DEFAULT_BASE_URL=https://api.chatfire.site/v1
 
 # 将前端构建变量注入到 Vite 构建环境。
 ENV VITE_API_BASE_URL=${VITE_API_BASE_URL} \
+  VITE_SUB2API_BASE_URL=${VITE_SUB2API_BASE_URL} \
+  VITE_BASE_PATH=${VITE_BASE_PATH} \
   VITE_PROVIDER_DEFAULT_BASE_URL=${VITE_PROVIDER_DEFAULT_BASE_URL}
 
 # 复制依赖目录。
@@ -52,6 +56,7 @@ WORKDIR /app
 # 声明生产环境与默认运行目录。
 ENV NODE_ENV=production \
   SERVER_PORT=5409 \
+  VITE_BASE_PATH=/duomi-studio/ \
   STATIC_DIST_DIR=/app/dist \
   UPLOADS_DIR=/app/uploads
 
@@ -66,7 +71,7 @@ RUN --mount=type=cache,target=/root/.npm \
   && apt-get install -y --no-install-recommends openssl ca-certificates \
   && rm -rf /var/lib/apt/lists/* \
   && npm install --omit=dev --no-fund --no-audit \
-  && DATABASE_URL='mysql://root:placeholder@127.0.0.1:3306/canana_mind' npx prisma generate
+  && DATABASE_URL='mysql://root:placeholder@127.0.0.1:3306/duomi_ai_studio' npx prisma generate
 
 # 创建上传目录，供本地媒体资源持久化使用。
 RUN mkdir -p /app/uploads

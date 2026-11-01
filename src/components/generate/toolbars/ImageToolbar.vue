@@ -18,6 +18,7 @@ interface Props {
   placement?: Placement
   // 是否只显示图标（侧边栏模式）
   iconOnly?: boolean
+  models?: Array<{ value: string; label: string }>
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -27,7 +28,7 @@ const props = withDefaults(defineProps<Props>(), {
 
 // 模型版本配置（内置 + 自定义）
 const modelVersions = computed(() =>
-  getAllImageModels().map((m: any) => ({ value: m.key, label: m.label }))
+  props.models ?? getAllImageModels().map((m: any) => ({ value: m.key, label: m.label }))
 )
 
 // 尺寸配置
@@ -153,7 +154,8 @@ watch(
     const values = options.map(item => item.value)
     if (!values.length) return
     if (!values.includes(currentModelVersion.value)) {
-      currentModelVersion.value = getDefaultImageModelKey() || values[0]
+      const configuredDefault = getDefaultImageModelKey()
+      currentModelVersion.value = values.includes(configuredDefault) ? configuredDefault : values[0]
     }
   },
   { immediate: true },
@@ -167,7 +169,7 @@ watch(currentImageMax, (max) => {
 })
 
 onMounted(() => {
-  void loadPublicModelCatalog()
+  if (!props.models) void loadPublicModelCatalog()
 })
 
 watch(

@@ -68,6 +68,8 @@ export default defineConfig(({ mode }) => {
   const apiProxyTarget = String(env.VITE_API_BASE_URL || 'http://localhost:5409').replace(/\/+$/, '')
 
   return {
+  // 生产环境可将独立构建挂载到 Sub 的 /duomi-studio/ 子路径。
+  base: String(env.VITE_BASE_PATH || '/').trim() || '/',
   plugins: [
     // Vue 插件仅处理 .vue 文件，避免与 React JSX 互扰
     vue({ include: [/\.vue$/] }),

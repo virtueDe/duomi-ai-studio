@@ -69,7 +69,8 @@ const syncSiteRuntime = (settings: SystemConfigPayload) => {
 
   const siteName = String(settings.siteInfo.siteName || '').trim()
   if (siteName) {
-    document.title = siteName
+    const currentPath = window.location.pathname.replace(/\/+$/, '') || '/'
+    document.title = currentPath === '/duomi-studio' ? 'Duomi AI Studio' : siteName
   }
 
   const description = String(settings.siteInfo.siteDescription || '').trim()

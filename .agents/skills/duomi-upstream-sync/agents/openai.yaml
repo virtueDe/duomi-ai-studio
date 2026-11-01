@@ -1,0 +1,7 @@
+interface:
+  display_name: "Duomi AI Studio Upstream Sync"
+  short_description: "Sync CanvasMind upstream while preserving Duomi integrations"
+  default_prompt: "Use $duomi-upstream-sync to review and integrate an upstream CanvasMind release without losing Duomi-specific behavior."
+
+policy:
+  allow_implicit_invocation: true

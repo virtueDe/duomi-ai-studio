@@ -10,10 +10,14 @@ const props = defineProps({
   title: {
     type: String,
     default: '未命名项目'
-  }
+  },
+  gatewayMode: { type: String, default: 'canvas' },
+  apiKeys: { type: Array, default: () => [] },
+  activeApiKeyId: { type: Number, default: null },
+  modelsLoading: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['update:title', 'toggle-panel'])
+const emit = defineEmits(['update:title', 'toggle-panel', 'select-api-key'])
 
 const isEditing = ref(false)
 const editTitle = ref(props.title)
@@ -112,7 +116,7 @@ const handleSettingsSave = (data) => {
 
 onMounted(() => {
   document.addEventListener('mousedown', closeMenu)
-  void marketingCenterStore.loadOverview()
+  if (props.gatewayMode !== 'duomi') void marketingCenterStore.loadOverview()
 })
 
 onUnmounted(() => {
@@ -244,8 +248,20 @@ onUnmounted(() => {
     <!-- 右侧 -->
     <div class="top-bar-right">
       <div class="top-bar-right-inner">
+        <label v-if="gatewayMode === 'duomi'" class="duomi-key-control">
+          <span class="duomi-key-label">API Key</span>
+          <select
+            :value="activeApiKeyId ?? ''"
+            :disabled="modelsLoading"
+            aria-label="选择 Sub2API Key"
+            @change="emit('select-api-key', Number($event.target.value))"
+          >
+            <option v-for="key in apiKeys" :key="key.id" :value="key.id">{{ key.name }} · {{ key.groupName }}</option>
+          </select>
+        </label>
+        <a v-if="gatewayMode === 'duomi'" class="duomi-key-manage" href="/keys">管理</a>
         <!-- 积分显示 -->
-        <button class="credit-display credit-display--button" type="button" @click="openMarketingEntry">
+        <button v-if="gatewayMode !== 'duomi'" class="credit-display credit-display--button" type="button" @click="openMarketingEntry">
           <div class="credit-display-container">
             <div class="credit-amount-container">
               <svg width="12" height="12" viewBox="0 0 25 24" fill="none">
@@ -259,7 +275,7 @@ onUnmounted(() => {
         </button>
         
         <!-- 分享按钮 -->
-        <button class="share-button" type="button">
+        <button v-if="gatewayMode !== 'duomi'" class="share-button" type="button">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
             <path d="M10.537 4.875c0-1.62 1.92-2.475 3.124-1.391l7.493 6.744c.806.725.806 1.99 0 2.715l-7.493 6.743c-1.205 1.084-3.123.23-3.123-1.39v-2.04a8.023 8.023 0 0 0-5.349 2.633 1.833 1.833 0 0 1-1.971.505A1.794 1.794 0 0 1 2 17.69v-.101c0-5.242 3.644-9.63 8.537-10.773V4.875Zm2.28.467a.2.2 0 0 0-.334.148v1.96a1.17 1.17 0 0 1-.973 1.153 9.12 9.12 0 0 0-7.562 8.762 9.969 9.969 0 0 1 7.397-3.076 1.164 1.164 0 0 1 1.138 1.165v2.226a.2.2 0 0 0 .334.149l6.937-6.244-6.937-6.243Z" fill="currentColor" fill-rule="evenodd" clip-rule="evenodd"/>
           </svg>
@@ -384,6 +400,45 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.duomi-key-control {
+  align-items: center;
+  background: var(--canvas-bg-block-default);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  display: flex;
+  gap: 6px;
+  height: 36px;
+  padding: 0 8px;
+}
+
+.duomi-key-label {
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.duomi-key-control select {
+  background: transparent;
+  border: 0;
+  color: var(--text-primary);
+  font-size: 12px;
+  max-width: 180px;
+  outline: none;
+}
+
+.duomi-key-control select:disabled {
+  opacity: 0.6;
+}
+
+.duomi-key-manage {
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.duomi-key-manage:hover {
+  color: var(--text-primary);
 }
 
 .credit-display--button {
