@@ -8,6 +8,7 @@ WORKDIR /app
 
 # 复制依赖声明文件与 Prisma 生成所需元数据。
 COPY package.json ./
+COPY pnpm-lock.yaml ./
 COPY prisma ./prisma
 COPY prisma.config.ts ./
 
@@ -15,8 +16,9 @@ COPY prisma.config.ts ./
 # Prisma 7 在 postinstall 的 prisma generate 阶段会读取 DATABASE_URL，
 # 这里提供一个仅用于生成客户端的占位值，避免镜像构建期因缺少真实数据库配置而失败。
 RUN --mount=type=cache,target=/root/.npm \
-  DATABASE_URL='mysql://root:placeholder@127.0.0.1:3306/duomi_ai_studio' \
-  npm install --include=dev --no-fund --no-audit
+  corepack enable \
+  && corepack prepare pnpm@10.32.1 --activate \
+  && DATABASE_URL='mysql://root:placeholder@127.0.0.1:3306/duomi_ai_studio' pnpm install --frozen-lockfile
 # ==================== Stage 2: 构建产物 ====================
 FROM --platform=$BUILDPLATFORM node:22-bookworm-slim AS builder
 

@@ -180,7 +180,7 @@ const systemInitStore = useSystemInitStore()
 const systemSettingsStore = useSystemSettingsStore()
 
 const step = ref(0)
-const appVersion = '0.1.1'
+const appVersion = '0.1.2'
 const logoInputRef = ref<HTMLInputElement | null>(null)
 const iconInputRef = ref<HTMLInputElement | null>(null)
 const uploadingLogo = ref(false)
