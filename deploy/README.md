@@ -6,11 +6,11 @@ Duomi 使用独立 Docker 镜像发布，不依赖 Sub2API 的源码构建。正
 git add -A
 git commit -m "feat: ..."
 git push origin master
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.1.1
+git push origin v0.1.1
 ```
 
-推送 `v0.1.0` 后，GitHub Actions 会构建并推送 GHCR 镜像、上传 Compose 文件、更新服务器镜像并重启 Duomi 容器。
+推送 `v0.1.1` 后，GitHub Actions 会构建并推送 GHCR 镜像、上传 Compose 文件、更新服务器镜像并重启 Duomi 容器。
 
 ## GitHub 配置
 
@@ -82,7 +82,7 @@ R2/S3 不放进 GitHub Secrets。服务启动后，在 Duomi 管理后台的对�
 
 ```text
 APP_ENV_FILE=.env.production
-DUOMI_IMAGE=ghcr.io/<github-owner>/duomi-ai-studio:0.1.0
+DUOMI_IMAGE=ghcr.io/<github-owner>/duomi-ai-studio:0.1.1
 ```
 
 再把 `deploy/docker-compose.duomi.yml` 上传为 `docker-compose.duomi.yml`，然后执行：
@@ -97,7 +97,7 @@ docker compose -f docker-compose.duomi.yml up -d --no-deps app
 
 ## 手动部署或回滚
 
-在 Actions 中运行 `Duomi AI Studio 手动部署`，填写要部署的镜像 tag，例如 `0.1.0`。该流程只更新镜像，不覆盖服务器 `.env.production`。
+在 Actions 中运行 `Duomi AI Studio 手动部署`，填写要部署的镜像 tag，例如 `0.1.1`。该流程只更新镜像，不覆盖服务器 `.env.production`。
 
 发布后检查：
 

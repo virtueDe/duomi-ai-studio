@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       image_tag:
-        description: 'GHCR 镜像 tag，例如 0.1.0 或 latest'
+        description: 'GHCR 镜像 tag，例如 0.1.1 或 latest'
         required: true
         default: latest
         type: string
